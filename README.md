@@ -269,3 +269,8 @@ cached balance must never imply a stale rate. A failure answers `502` with
 `{ "error": "…" }`, which the pill renders as a retryable *Balance unavailable*
 state rather than showing a wrong number (the rate badge still renders, since it
 needs no network).
+
+## License
+
+MIT — do whatever you like with it; no warranty, no liability. See the
+[MIT license text](https://opensource.org/licenses/MIT).
