@@ -1,19 +1,25 @@
 # dsh-plugin-balance
 
-DeepSeek account balance for the DeepSeek Harness Web UI — a small pill under
-the chat input, next to the session stats strip (`1 turn 6 steps · 272 tok/s`).
+DeepSeek account balance for the DeepSeek Harness Web UI — a small pill inline
+with the session stats strip (`1 turn 6 steps · 272 tok/s`), on the same line as
+the token and cache counters:
 
 ```
                         ┌─────────────────────────────────────────────┐
                         │  Ask anything…                              │
                         └─────────────────────────────────────────────┘
-                ⏲ 1 turn 6 steps · 272 tok/s   👛 $1.80 · Off-peak · 13h left
+   ⏲ 1 turn 6 steps · 272 tok/s   🧠 8.1M tok · Cache 99%   👛 $1.80 · Off-peak · 13h left
 ```
 
-Reads `GET /user/balance` from the
-[DeepSeek API](https://api-docs.deepseek.com/api/get-user-balance) with the same
-credential the chat adapter uses, and shows which rate currently applies plus
-how long that rate still runs.
+The credit is read from whichever source the harness actually bills: the
+DeepSeek **account provider's Platform wallet** (the same reading Settings →
+Account shows, and the one a signed-in harness has), then `GET /user/balance`
+from the [DeepSeek API](https://api-docs.deepseek.com/api/get-user-balance) with
+the `DEEPSEEK_API_KEY` credential as a fallback. The rate badge shows which rate
+currently applies plus how long that rate still runs.
+
+The peak-messaging gate is configured on the plugin's own page under the
+sidebar's **Plugins** entry, not on the composer.
 
 ## Peak / off-peak
 
@@ -81,12 +87,17 @@ rates before they are sent:
   a request would leave.
 - **A blocked message never generated anything**, so its failure is the user's
   entry point to decide: the turn fails with
-  `peak rates apply until 04:00 UTC … Flip the toggle under the chat input`,
-  and retrying after flipping (or after the window ends) sends it normally.
+  `peak rates apply until 04:00 UTC … Enable Peak Messaging is off`,
+  and retrying after enabling the setting (or after the window ends) sends it
+  normally.
 
 ### Enable Peak Messaging
 
-The switch sits under the chat input, directly below the balance pill. Off by
+The switch lives on the plugin's own configuration page: sidebar **Plugins** →
+`dsh-plugin-balance` → the `plugin-balance` row → **Configure**. The browser
+half registers that page through `plugins.row.config` under the key
+`dsh-plugin-balance#plugin-balance`, so the Plugins page grows the Configure
+control itself; the composer dock keeps only the balance/rate pill. Off by
 default, persisted across restarts in a small JSON document next to the other
 plugin state. It renders always — including off-peak, since pre-clicking it
 before a window opens is fully supported — and is just styled slightly faded
@@ -138,14 +149,15 @@ same-origin route.
 
 | File | Role |
 | --- | --- |
-| `lib/index.js` | Host half: credential resolution, `GET /user/balance`, cache, and the read-only route `/plugins/dsh-plugin-balance/api/balance` |
+| `lib/index.js` | Host half: source resolution (account wallet, then API key), cache, the read-only route `/plugins/dsh-plugin-balance/api/balance`, and the peak gate |
+| `lib/account-balance.js` | Maps the DeepSeek account provider's `getBalance()` wallet into the row shape (recharge + granted, summed per currency) |
 | `lib/schedule.js` | The UTC peak/off-peak calendar and cycle countdown — the one canonical schedule |
 | `src/client.template.js` | Source of the browser bundle |
-| `lib/client.js` | **Generated** browser bundle registering the `conversation.composer.dock` entry |
+| `lib/client.js` | **Generated** browser bundle registering the `conversation.composer.dock` pill and the `plugins.row.config` settings page |
 | `scripts/build-client.mjs` | Weaves the schedule into the template to produce `lib/client.js` |
 | `cordis.patch.yml` | The profile patch this package ships as its own bundle layer |
 | `test/rate-schedule.test.mjs` | Window parsing, UTC boundaries, and a full-week sweep proving every countdown hits the true next transition |
-| `test/host.test.mjs` | Host-half checks, including one live API reading |
+| `test/host.test.mjs` | Host-half checks, including the account-wallet source and one live API reading |
 | `test/client.test.mjs` | Bundle-contract, slot-registration, render, and inlined-vs-canonical schedule checks |
 
 ### Why the client bundle is generated
@@ -202,10 +214,14 @@ The row accepts optional overrides in `$DSH_HOME/profiles/web/cordis.patch.yml`:
 ```yaml
 - id: plugin-balance
   config:
-    apiKeyEnv: DEEPSEEK_API_KEY     # credential reference (default)
+    apiKeyEnv: DEEPSEEK_API_KEY     # credential reference for the fallback source (default)
     baseURL: https://api.deepseek.com
     cacheMs: 30000                  # host-side cache window
 ```
+
+With a signed-in DeepSeek account the account provider is preferred and none of
+the fallback fields matter; a harness that only stores an API key keeps using
+`GET /user/balance` exactly as before.
 
 ## Tests
 
@@ -240,6 +256,7 @@ two suites need a real key, so `npm run test:ci` runs the portable subset used i
 ```json
 {
   "isAvailable": true,
+  "source": "account",
   "cached": false,
   "fetchedAt": 1757000000000,
   "rate": {
@@ -264,11 +281,14 @@ two suites need a real key, so `npm run test:ci` runs the portable subset used i
 }
 ```
 
-`rate` is recomputed per request even when `balances` comes from the cache — a
-cached balance must never imply a stale rate. A failure answers `502` with
-`{ "error": "…" }`, which the pill renders as a retryable *Balance unavailable*
-state rather than showing a wrong number (the rate badge still renders, since it
-needs no network).
+`source` names the half that answered: `account` for the account provider's
+Platform wallet, `api-key` for `GET /user/balance`. The browser also passes
+`locale` and `tz` (seconds east of UTC) so the Platform request carries the
+surface language and clock; both are optional. `rate` is recomputed per request
+even when `balances` comes from the cache — a cached balance must never imply a
+stale rate. A failure answers `502` with `{ "error": "…" }`, which the pill
+renders as a retryable *Balance unavailable* state rather than showing a wrong
+number (the rate badge still renders, since it needs no network).
 
 ## License
 

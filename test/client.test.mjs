@@ -462,7 +462,7 @@ await check('exports apply and inject', () => {
   assert.equal(typeof moduleExports.apply, 'function')
 })
 
-await check('apply registers one composer-dock entry and injects its stylesheet', () => {
+await check('apply registers the dock pill and the plugin settings page', () => {
   const injections = []
   const registrationsSeen = []
   const ctx = {
@@ -480,19 +480,29 @@ await check('apply registers one composer-dock entry and injects its stylesheet'
     },
   }
   moduleExports.apply(ctx)
-  assert.deepEqual(injections[0], 'conversation.composer.dock')
-  assert.equal(registrationsSeen.length, 2, 'two dock entries: the balance pill and the peak toggle')
-  assert.equal(registrationsSeen[0].options.id, 'balance')
-  assert.equal(registrationsSeen[1].options.id, 'balance-peak-messaging')
-  assert.equal(registrationsSeen[0].options.order, 10)
-  assert.equal(registrationsSeen[1].options.order, 11, 'the toggle sits directly under the pill')
+  assert.deepEqual(injections, ['conversation.composer.dock', 'plugins.row.config'])
+  assert.equal(registrationsSeen.length, 2, 'one dock entry and one settings page')
+  assert.deepEqual(registrationsSeen[0].options, { name: 'conversation.composer.dock', id: 'balance', order: 2 })
+  assert.deepEqual(registrationsSeen[1].options, {
+    name: 'plugins.row.config',
+    key: 'dsh-plugin-balance#plugin-balance',
+  })
+  assert.equal(registrationsSeen.filter((entry) => entry.options.name === 'conversation.composer.dock').length, 1)
   assert.equal(typeof registrationsSeen[0].component, 'function')
   assert.equal(typeof registrationsSeen[1].component, 'function')
   assert.equal(styleTags.length, 1, 'exactly one stylesheet tag')
   assert.match(styleTags[0].textContent, /\.dshBalancePill/)
-  assert.match(styleTags[0].textContent, /\.dshPeakSwitch/, 'the stylesheet styles the toggle switch')
+  assert.match(styleTags[0].textContent, /\.dshPeakSwitch/, 'the stylesheet styles the settings switch')
+  assert.doesNotMatch(styleTags[0].textContent, /dshBalanceRow/, 'the pill no longer draws its own full-width row')
   assert.equal(styleTags[0].dataset.pluginCss, 'dsh-plugin-balance/balance.css')
   assert.equal(styleTags[0].dataset.plugin, 'dsh-plugin-balance')
+})
+
+await check('the settings page renders only for the page view', () => {
+  assert.equal(moduleExports.BalanceSettingsPage({ view: 'summary' }), null)
+  assert.equal(moduleExports.BalanceSettingsPage({}), null)
+  const page = moduleExports.BalanceSettingsPage({ view: 'page' })
+  assert.equal(page.props.className, 'dshBalanceSettings')
 })
 
 await check('dominantBalance prefers USD, never the larger number', () => {
@@ -537,9 +547,10 @@ await check('renders the loading state first, before any request resolves', asyn
   const harness = mount(React.createElement(moduleExports.BalancePill))
   const tree = harness.paint()
   const html = markup(tree)
-  assert.match(html, /dshBalanceRow/)
+  assert.match(html, /data-composer-balance/)
   assert.match(html, /data-state="loading"/)
   assert.match(html, /Balance …/)
+  assert.doesNotMatch(html, /dshBalanceRow/, 'the pill renders inline for the composer dock row')
 })
 
 await check('renders the ready state from the host route', async () => {

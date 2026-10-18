@@ -1,8 +1,8 @@
 {
   "name": "dsh-plugin-balance",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
-  "description": "DeepSeek account balance in the DSH Web composer dock — shows remaining credit under the chat input",
+  "description": "DeepSeek balance and peak/off-peak rate pill for the DSH Web composer dock, with its gate configured on the plugin page",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

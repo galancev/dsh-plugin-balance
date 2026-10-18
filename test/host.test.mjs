@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 
-import { apply, fetchBalance, inject, name, normalizeBalance } from '../lib/index.js'
+import { apply, fetchBalance, inject, name, normalizeAccountBalance, normalizeBalance } from '../lib/index.js'
 import { credentialKey, dshHome, loadYaml } from './env.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -160,6 +160,81 @@ await check('serves a 502 with the reason when no credential exists', async () =
   assert.match(body.error, /no API key/)
   assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.equal(warnings.length, 1)
+})
+
+await check('normalizes the account provider wallet into rows', () => {
+  const parsed = normalizeAccountBalance({
+    status: 'ready',
+    value: [{ currency: 'USD', balance: '1.6328435240000000' }],
+    bonusWallets: [{ currency: 'USD', balance: '0.20' }],
+  })
+  assert.equal(parsed.isAvailable, true)
+  assert.equal(parsed.balances.length, 1)
+  assert.equal(parsed.balances[0].currency, 'USD')
+  assert.ok(Math.abs(parsed.balances[0].totalBalance - 1.832843524) < 1e-9)
+  assert.ok(Math.abs(parsed.balances[0].toppedUpBalance - 1.632843524) < 1e-9)
+  assert.ok(Math.abs(parsed.balances[0].grantedBalance - 0.2) < 1e-9)
+  assert.equal(parsed.balances[0].totalBalanceText, '1.83', 'the text form is the rounded sum')
+
+  const empty = normalizeAccountBalance({ status: 'ready', value: [], bonusWallets: [] })
+  assert.deepEqual(empty, { isAvailable: false, balances: [] })
+})
+
+await check('prefers the signed-in account wallet over the API-key route', async () => {
+  const { ctx, routes } = fakeContext()
+  const calls = []
+  const accountCtx = {
+    ...ctx,
+    get: (service) =>
+      service === 'deepseekAccount'
+        ? {
+            getBalance: async (client) => {
+              calls.push(client)
+              return { status: 'ready', value: [{ currency: 'USD', balance: '1.6328' }], bonusWallets: [] }
+            },
+          }
+        : undefined,
+  }
+  apply(accountCtx)
+  const previous = globalThis.fetch
+  globalThis.fetch = () => assert.fail('the API-key route must not run while the account answers')
+  try {
+    const response = await invoke(routes[0], '/plugins/dsh-plugin-balance/api/balance?locale=ru-RU&tz=10800')
+    assert.equal(response.status, 200)
+    const body = JSON.parse(response.body)
+    assert.equal(body.source, 'account')
+    assert.equal(body.isAvailable, true)
+    assert.ok(Math.abs(body.balances[0].totalBalance - 1.6328) < 1e-9)
+    assert.equal(calls.length, 1, 'the route reads the account once')
+    assert.equal(calls[0].locale, 'ru-RU')
+    assert.equal(calls[0].timezoneOffsetSeconds, 10800)
+
+    // A failed account read falls through to the API-key route.
+    const fresh = fakeContext()
+    const fallbackCtx = {
+      ...fresh.ctx,
+      get: (service) =>
+        service === 'deepseekAccount'
+          ? { getBalance: async () => ({ status: 'failed' }) }
+          : service === 'credentials'
+            ? { resolve: async () => ({ value: 'k', source: 'test' }) }
+            : undefined,
+    }
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      async json() {
+        return { is_available: true, balance_infos: [{ currency: 'USD', total_balance: '3.50' }] }
+      },
+    })
+    apply(fallbackCtx)
+    const fallback = JSON.parse((await invoke(fresh.routes[0])).body)
+    assert.equal(fallback.source, 'api-key')
+    assert.equal(fallback.balances[0].totalBalance, 3.5)
+  } finally {
+    globalThis.fetch = previous
+  }
 })
 
 await check('serves 200 with cached:false for a live reading', async () => {
